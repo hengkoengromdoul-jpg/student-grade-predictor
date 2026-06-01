@@ -404,7 +404,7 @@ def page_explore(df):
 
 
 def page_predict_grade(models, df):
-    st.title("🔮 Predict Final Grade (G3)")
+    st.title(" Predict Final Grade (G3)")
     st.caption("Random Forest Regression · SDG 4 — forecast outcomes for early support.")
 
     raw = student_input_form("reg")
