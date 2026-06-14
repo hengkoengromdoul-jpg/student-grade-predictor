@@ -6,37 +6,84 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 
-# ==========================================
-# 1. PAGE SETUP & HUMAN-CENTRIC BRANDING
-# ==========================================
-st.set_page_config(page_title="Early Intervention Dashboard", page_icon="🌱", layout="wide")
+# ==========================================================
+# 1. PAGE CONFIG
+# ==========================================================
+st.set_page_config(page_title="Student Support Compass", page_icon="🌱", layout="wide")
 
-# Custom CSS for a warm, clean layout  (FIX: unsafe_allow_html, not unsafe_index)
+# ==========================================================
+# 2. VISUAL IDENTITY  (growth & support theme)
+# ==========================================================
 st.markdown("""
-    <style>
-    .main-title { font-size: 32px; font-weight: bold; color: #1E3A8A; margin-bottom: 5px; }
-    .subtitle { font-size: 16px; color: #4B5563; margin-bottom: 25px; }
-    .card { background-color: #F3F4F6; padding: 20px; border-radius: 10px; margin-bottom: 15px; }
-    </style>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Nunito+Sans:wght@400;600;700;800&display=swap');
+
+:root{
+  --ink:#1B2A2F; --muted:#5A6B62; --bg:#F6F8F5; --line:#E4EAE3;
+  --thrive:#2E9E6B; --thrive-soft:#DCEEE3; --thrive-deep:#1E7A4F;
+  --care:#E8765A; --care-soft:#FBE3DC; --care-deep:#C4502F;
+  --gold:#E8A33D; --teal:#155E63;
+}
+.stApp{ background:var(--bg); }
+html,body,[class*="css"],p,div,span,label,.stMarkdown,.stRadio,.stSelectbox,.stSlider{
+  font-family:'Nunito Sans',-apple-system,Segoe UI,sans-serif; color:var(--ink);
+}
+h1,h2,h3,h4{ font-family:'Fraunces',Georgia,serif; }
+
+/* Hero */
+.hero{ background:linear-gradient(135deg,#155E63 0%,#2E9E6B 100%);
+  border-radius:22px; padding:32px 36px; margin-bottom:18px;
+  box-shadow:0 14px 34px rgba(21,94,99,.28); }
+.hero .pill{ display:inline-block; background:rgba(255,255,255,.16);
+  border:1px solid rgba(255,255,255,.32); color:#EAFBF2; padding:5px 14px;
+  border-radius:999px; font-size:12px; font-weight:800; letter-spacing:1px;
+  text-transform:uppercase; margin-bottom:14px; }
+.hero h1{ color:#fff; font-size:36px; font-weight:700; margin:0 0 8px 0; letter-spacing:-.5px; }
+.hero p{ color:#E8F5EE; font-size:15px; margin:0; max-width:780px; line-height:1.5; }
+
+/* Section headers */
+.eyebrow{ font-size:12px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase;
+  color:var(--thrive); margin:6px 0 0 0; }
+.section-title{ font-size:23px; font-weight:600; margin:0 0 2px 0; }
+.col-head{ font-size:13px; font-weight:800; letter-spacing:.4px; text-transform:uppercase;
+  color:var(--teal); border-bottom:2px solid var(--thrive-soft); padding-bottom:6px; margin-bottom:8px; }
+
+/* Result card */
+.result{ border-radius:20px; padding:26px 30px; margin:8px 0 16px 0; }
+.result.thrive{ background:var(--thrive-soft); border-left:7px solid var(--thrive); }
+.result.care{ background:var(--care-soft); border-left:7px solid var(--care); }
+.result h2{ margin:0 0 6px 0; font-size:27px; }
+.result.thrive h2{ color:var(--thrive-deep); }
+.result.care h2{ color:var(--care-deep); }
+.result p{ font-size:15px; margin:0; line-height:1.55; color:var(--ink); }
+
+/* Signature: support meter */
+.meter-wrap{ background:#fff; border:1px solid var(--line); border-radius:16px; padding:18px 22px; margin-bottom:14px; }
+.meter-title{ font-size:13px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:var(--muted); }
+.meter-track{ height:18px; border-radius:999px; margin:12px 0 6px 0; position:relative;
+  background:linear-gradient(90deg,#2E9E6B 0%,#E8A33D 55%,#E8765A 100%); }
+.meter-marker{ position:absolute; top:-7px; width:7px; height:32px; background:var(--ink);
+  border-radius:4px; box-shadow:0 0 0 3px #fff,0 2px 6px rgba(0,0,0,.25); }
+.meter-labels{ display:flex; justify-content:space-between; font-size:11px; font-weight:700; color:#90A096; }
+
+/* Recommendation cards */
+.rec{ background:#fff; border:1px solid var(--line); border-radius:16px; padding:18px 20px; height:100%; }
+.rec .num{ font-family:'Fraunces',serif; font-size:22px; font-weight:700; color:var(--thrive); }
+.rec h4{ margin:8px 0 5px 0; font-size:15px; }
+.rec p{ font-size:13px; color:var(--muted); margin:0; line-height:1.5; }
+</style>
 """, unsafe_allow_html=True)
 
-st.markdown('<p class="main-title">🌱 Early Student Support & Intervention Dashboard</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Using predictive insights to build inclusive, equitable, and quality learning environments (Supporting UN SDG 4 & 5)</p>', unsafe_allow_html=True)
-
-# ==========================================
-# 2. ENGINE & DATA PROCESSING (Cached)
-# ==========================================
+# ==========================================================
+# 3. ENGINE & DATA  (cached)
+# ==========================================================
 @st.cache_data
-def load_and_clean_engine():
+def load_engine():
     df = pd.read_csv("student-mat.csv")
+    df["needs_support"] = (df["G3"] < 10).astype(int)
 
-    # Target: support needed if final grade G3 < 10
-    df['needs_support'] = (df['G3'] < 10).astype(int)
-
-    # NOTE: this version excludes G1, G2, G3 from the features.
-    X = df.drop(columns=['G1', 'G2', 'G3', 'needs_support'])
-    y = df['needs_support']
-
+    X = df.drop(columns=["G1", "G2", "G3", "needs_support"])
+    y = df["needs_support"]
     raw_features = X.copy()
     X_encoded = pd.get_dummies(X, drop_first=True)
     feature_columns = X_encoded.columns.tolist()
@@ -44,145 +91,183 @@ def load_and_clean_engine():
     X_train, X_test, y_train, y_test = train_test_split(
         X_encoded, y, test_size=0.2, random_state=42, stratify=y
     )
-
     scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    model = RandomForestClassifier(n_estimators=120, random_state=42, class_weight="balanced")
+    model.fit(scaler.fit_transform(X_train), y_train)
+    acc = accuracy_score(y_test, model.predict(scaler.transform(X_test)))
 
-    model = RandomForestClassifier(n_estimators=120, random_state=42, class_weight='balanced')
-    model.fit(X_train_scaled, y_train)
-
-    acc = accuracy_score(y_test, model.predict(X_test_scaled))
-    return model, scaler, feature_columns, raw_features, acc
+    cohort = {
+        "absences": df["absences"].mean(),
+        "failures": df["failures"].mean(),
+        "studytime": df["studytime"].mean(),
+        "n": len(df),
+        "at_risk_rate": y.mean() * 100,
+    }
+    return model, scaler, feature_columns, raw_features, acc, cohort
 
 try:
-    model, scaler, model_features, raw_X, model_accuracy = load_and_clean_engine()
+    model, scaler, model_features, raw_X, model_accuracy, cohort = load_engine()
 except FileNotFoundError:
-    st.error("❌ Could not locate 'student-mat.csv' in this directory. Please upload it to proceed.")
+    st.error("Could not find 'student-mat.csv' in this folder. Add it to the repo and rerun.")
     st.stop()
 
-# ==========================================
-# 3. SIDEBAR: PROJECT INSIGHTS & PURPOSE
-# ==========================================
+# ==========================================================
+# 4. HERO
+# ==========================================================
+st.markdown("""
+<div class="hero">
+  <span class="pill">🌱 Supporting UN SDG 4 &amp; 5</span>
+  <h1>Student Support Compass</h1>
+  <p>A wellness check that spots students who may need a helping hand — early, and before grades slip —
+  so every learner gets a fair chance to thrive.</p>
+</div>
+""", unsafe_allow_html=True)
+
+# Status strip
+s1, s2, s3 = st.columns(3)
+s1.metric("Model accuracy", f"{model_accuracy*100:.1f}%")
+s2.metric("Students learned from", f"{cohort['n']}")
+s3.metric("Needed support in data", f"{cohort['at_risk_rate']:.0f}%")
+
+# ==========================================================
+# 5. SIDEBAR
+# ==========================================================
 with st.sidebar:
-    st.markdown("### 📊 Dashboard Status")
-    st.metric(label="Model Accuracy", value=f"{model_accuracy * 100:.1f}%")
-
+    st.markdown("### 🧭 What this tool does")
+    st.markdown(
+        "It reads a student's background and habits, then estimates whether they're on a "
+        "healthy path or could use early support — turning a quiet worry into a clear, kind action."
+    )
     st.markdown("---")
-    st.markdown("### 🎯 Core Objectives")
-    st.markdown("""
-    * **SDG 4 (Quality Education):** Ensuring no student quietly slips through the cracks.
-    * **SDG 5 (Gender Equality):** Mapping socio-demographic variables like parental education to address systemic gaps.
-    * **Early prediction:** This version uses lifestyle and background factors only.
-    """)
+    st.markdown("### 🎯 Why it matters")
+    st.markdown(
+        "- **SDG 4 — Quality Education:** no student slips through the cracks unnoticed.\n"
+        "- **SDG 5 — Gender Equality:** surface where background and home factors create unequal odds.\n"
+        "- **Early by design:** uses habits and home context, not exam scores."
+    )
+    with st.expander("How to read the result"):
+        st.write(
+            "The support meter shows how likely a student is to need help — green means thriving, "
+            "coral means it's worth checking in. The comparison shows how this student sits next to "
+            "the class average."
+        )
 
-# ==========================================
-# 4. HUMANISED INPUT FORM
-# ==========================================
-st.markdown("### 🧑‍🎓 Student Profile Intake Form")
-st.caption("Fill out the baseline and behavioural details below to run an academic wellness check.")
+# ==========================================================
+# 6. INTAKE FORM
+# ==========================================================
+st.markdown('<p class="eyebrow">Step 1</p><p class="section-title">Tell us about the student</p>',
+            unsafe_allow_html=True)
+st.caption("A quick profile of habits and home context — no grades needed.")
 
-with st.container():
-    col1, col2, col3 = st.columns(3)
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.markdown('<div class="col-head">Who they are</div>', unsafe_allow_html=True)
+    sex_choice = st.radio("Gender", ["Female", "Male"], horizontal=True, key="gender_radio")
+    sex = "F" if sex_choice == "Female" else "M"
+    age = st.slider("Age", 15, 22, 17)
+    failures = st.selectbox("Past classes not passed", [0, 1, 2, 3],
+                            help="How many classes the student has failed before.")
+    absences = st.number_input("Days absent this year", min_value=0, max_value=90, value=4)
 
-    with col1:
-        st.markdown("**Socio-Demographics**")
-        sex_choice = st.radio("Gender Profile", options=["Female", "Male"], horizontal=True, key="gender_radio")
-        sex = "F" if sex_choice == "Female" else "M"
-        age = st.slider("Current Age", 15, 22, 17)
-        failures = st.selectbox("Previous Unpassed Classes", options=[0, 1, 2, 3],
-                                help="Number of past class failures.")
-        absences = st.number_input("Total Days Absent", min_value=0, max_value=90, value=0)
+with col2:
+    st.markdown('<div class="col-head">Home &amp; foundation</div>', unsafe_allow_html=True)
+    medu_map = {"None": 0, "Primary (Grade 4)": 1, "Middle (Grade 9)": 2,
+                "Secondary": 3, "Higher education": 4}
+    Medu = medu_map[st.selectbox("Mother's education", list(medu_map.keys()), index=3)]
+    study_map = {"Under 2 hours": 1, "2-5 hours": 2, "5-10 hours": 3, "Over 10 hours": 4}
+    studytime = study_map[st.selectbox("Weekly study time", list(study_map.keys()), index=1)]
+    internet = st.radio("Internet at home?", ["Yes", "No"], horizontal=True)
 
-    with col2:
-        st.markdown("**Home & Foundation**")
-        medu_map = {"None": 0, "Primary (4th Grade)": 1, "Middle School (9th Grade)": 2,
-                    "Secondary Education": 3, "Higher Education": 4}
-        Medu_label = st.selectbox("Mother's Educational Background", options=list(medu_map.keys()), index=3)
-        Medu = medu_map[Medu_label]
+with col3:
+    st.markdown('<div class="col-head">Daily life</div>', unsafe_allow_html=True)
+    goout = st.slider("Time out with friends", 1, 5, 3, help="1 = rarely, 5 = very often.")
+    health = st.slider("Current health", 1, 5, 5, help="1 = unwell, 5 = energetic.")
+    schoolsup = st.radio("Extra school support?", ["Yes", "No"], index=1, horizontal=True)
+    famsup = st.radio("Family study support?", ["Yes", "No"], index=0, horizontal=True)
 
-        study_map = {"Less than 2 hours": 1, "2 to 5 hours": 2, "5 to 10 hours": 3, "More than 10 hours": 4}
-        study_label = st.selectbox("Weekly Self-Study Commitment", options=list(study_map.keys()), index=1)
-        studytime = study_map[study_label]
+# Fill remaining columns with dataset typical values (is_numeric_dtype: pandas-3 safe)
+input_data = {}
+for c in raw_X.columns:
+    input_data[c] = int(raw_X[c].median()) if pd.api.types.is_numeric_dtype(raw_X[c]) else raw_X[c].mode()[0]
+input_data.update({
+    "sex": sex, "age": age, "failures": failures, "absences": absences, "Medu": Medu,
+    "studytime": studytime, "internet": internet.lower(), "schoolsup": schoolsup.lower(),
+    "famsup": famsup.lower(), "goout": goout, "health": health,
+})
 
-        internet = st.radio("Reliable Web Access at Home?", options=["Yes", "No"], horizontal=True)
-
-    with col3:
-        st.markdown("**Social Lifestyle Balance**")
-        goout = st.slider("Frequency of Going Out with Peers", 1, 5, 3,
-                          help="1: Extremely isolated, 5: Highly social outside class hours.")
-        health = st.slider("Self-Reported Health & Vitality", 1, 5, 5,
-                           help="1: Severe exhaustion/illness, 5: Energetic and healthy.")
-        schoolsup = st.radio("Receiving Extra Institutional Support?", options=["Yes", "No"], index=1, horizontal=True)
-        famsup = st.radio("Receiving Educational Family Support?", options=["Yes", "No"], index=0, horizontal=True)
-
-# Fill non-form columns with dataset modes/medians to keep the form light
-input_data = {col: raw_X[col].mode()[0] if raw_X[col].dtype == 'object' else int(raw_X[col].median())
-              for col in raw_X.columns}
-
-# Overwrite with the user's choices  (FIX: sex was always becoming "M" before)
-input_data['sex'] = sex
-input_data['age'] = age
-input_data['failures'] = failures
-input_data['absences'] = absences
-input_data['Medu'] = Medu
-input_data['studytime'] = studytime
-input_data['internet'] = internet.lower()
-input_data['schoolsup'] = schoolsup.lower()
-input_data['famsup'] = famsup.lower()
-input_data['goout'] = goout
-input_data['health'] = health
-
-# ==========================================
-# 5. EXECUTION & ACTIONABLE OUTPUT
-# ==========================================
+# ==========================================================
+# 7. RESULT
+# ==========================================================
 st.markdown("<br>", unsafe_allow_html=True)
-if st.button("🔍 Evaluate Academic Wellness & Support Needs", type="primary", use_container_width=True):
+if st.button("🌱 Run wellness check", type="primary", use_container_width=True):
+    row = pd.DataFrame([input_data])
+    enc = pd.get_dummies(row)
+    final = pd.DataFrame(0, index=[0], columns=model_features)
+    for c in model_features:
+        if c in enc.columns:
+            final[c] = enc[c]
+    scaled = scaler.transform(final)
+    prob = model.predict_proba(scaled)[0][1] * 100
+    needs_support = model.predict(scaled)[0] == 1
 
-    input_df = pd.DataFrame([input_data])
-    input_encoded = pd.get_dummies(input_df)
+    st.markdown('<p class="eyebrow">Step 2</p><p class="section-title">The wellness check</p>',
+                unsafe_allow_html=True)
 
-    final_input = pd.DataFrame(0, index=[0], columns=model_features)
-    for col in model_features:
-        if col in input_encoded.columns:
-            final_input[col] = input_encoded[col]
-
-    scaled_vector = scaler.transform(final_input)
-    prediction = model.predict(scaled_vector)[0]
-    probability = model.predict_proba(scaled_vector)[0][1] * 100
-
-    st.markdown("---")
-    st.markdown("### 🎯 Diagnostic Evaluation Results")
-
-    if prediction == 1:
-        st.error("⚠️ **Action Recommended: Higher Academic Stress Risk Detected**")
-
-        m1, m2 = st.columns([1, 3])
-        m1.metric("Vulnerability Index", f"{probability:.1f}%",
-                  help="Probability that this profile needs proactive academic support.")
-        m2.markdown(f"""
-        **Educational Assessment:** This student shows a **{probability:.1f}%** alignment with profiles
-        that struggle to pass final assessments under standard teaching conditions.
-        The strongest stress signals are past unpassed classes (`failures`) and attendance irregularities (`absences`).
-        """)
-
-        st.markdown("#### 🛠️ Recommended Care Pathway")
-        c1, c2, c3 = st.columns(3)
-        c1.info("**1. Academic Coaching**\n\nInvite the student to peer-tutoring groups to review core subjects before major tests.")
-        c2.info("**2. Flexibility Review**\n\nCheck whether high absences come from health, family, or transport issues.")
-        c3.info("**3. Mentorship Connection**\n\nAssign a counsellor to build an early connection and rebuild classroom confidence.")
-
+    if needs_support:
+        st.markdown("""
+        <div class="result care">
+          <h2>🤝 Worth a check-in</h2>
+          <p>This student's habits and home context line up with profiles that often need a little
+          extra support to stay on track. A short, caring conversation now can make a real difference.</p>
+        </div>""", unsafe_allow_html=True)
     else:
-        st.success("✨ **Academic Standing: Stable & Thriving**")
-        st.balloons()   # 🎉 celebrate a good result
+        st.markdown("""
+        <div class="result thrive">
+          <h2>🌿 On a healthy path</h2>
+          <p>This student's profile points to strong momentum and a low chance of falling behind.
+          Keep doing what's working and check in occasionally.</p>
+        </div>""", unsafe_allow_html=True)
+        st.balloons()
+        st.toast("Great news - this student is thriving!", icon="🌿")
 
-        m1, m2 = st.columns([1, 3])
-        m1.metric("Vulnerability Index", f"{probability:.1f}%")
-        m2.markdown(f"""
-        **Educational Assessment:** This student's current indicators reflect strong academic endurance.
-        Their profile shows a very low (**{probability:.1f}%**) risk of falling behind.
-        """)
+    # Signature support meter
+    marker = min(max(prob, 2), 98)
+    st.markdown(f"""
+    <div class="meter-wrap">
+      <div class="meter-title">Support-need level — {prob:.0f}%</div>
+      <div class="meter-track"><div class="meter-marker" style="left:{marker}%"></div></div>
+      <div class="meter-labels"><span>Thriving</span><span>Watch</span><span>Needs support</span></div>
+    </div>""", unsafe_allow_html=True)
 
-        st.markdown("#### 🌾 Maintenance Plan")
-        st.markdown("* Keep providing standard access to campus web services and resource centres.\n"
-                    "* Monitor progress trends leading up to midterms without heavy intervention.")
+    # Live comparison with the class
+    st.markdown('<p class="eyebrow">How they compare</p><p class="section-title">This student vs the class</p>',
+                unsafe_allow_html=True)
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Days absent", f"{absences}",
+              delta=f"{absences - cohort['absences']:+.0f} vs class", delta_color="inverse")
+    k2.metric("Past failures", f"{failures}",
+              delta=f"{failures - cohort['failures']:+.1f} vs class", delta_color="inverse")
+    k3.metric("Weekly study", f"{studytime}",
+              delta=f"{studytime - cohort['studytime']:+.1f} vs class", delta_color="normal")
+
+    # Care pathway / maintenance
+    if needs_support:
+        st.markdown('<p class="eyebrow">Step 3</p><p class="section-title">A caring next step</p>',
+                    unsafe_allow_html=True)
+        r1, r2, r3 = st.columns(3)
+        r1.markdown('<div class="rec"><span class="num">01</span><h4>Coaching</h4>'
+                    '<p>Invite them to a small peer-tutoring group to review core subjects before tests.</p></div>',
+                    unsafe_allow_html=True)
+        r2.markdown('<div class="rec"><span class="num">02</span><h4>Check the cause</h4>'
+                    '<p>See whether absences come from health, family, or transport - then remove the barrier.</p></div>',
+                    unsafe_allow_html=True)
+        r3.markdown('<div class="rec"><span class="num">03</span><h4>A mentor</h4>'
+                    '<p>Pair them with a counsellor for an early, friendly connection that rebuilds confidence.</p></div>',
+                    unsafe_allow_html=True)
+    else:
+        st.markdown('<p class="eyebrow">Keep it going</p><p class="section-title">Light-touch plan</p>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            "- Keep steady access to study resources and the things already working.\n"
+            "- A gentle check-in around mid-term is enough - no heavy intervention needed."
+        )
