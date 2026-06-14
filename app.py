@@ -1,644 +1,188 @@
-"""
-Gender-Based Analysis of Student Academic Performance — Streamlit App
-=====================================================================
-Group 6 · Institute of Technology of Cambodia
-Department of Applied Mathematics and Statistics
-
-An interactive dashboard built from the team's mini-project notebook. It lets
-faculty explore the data, forecast a student's final grade (G3), and get an
-instant "At-Risk" alert — the live dashboard described in the project's
-Future Work. Framed around UN SDG 4 (Quality Education) and SDG 5 (Gender
-Equality).
-
-Run locally:   streamlit run app.py
-"""
-
-from pathlib import Path
-
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
 import streamlit as st
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.metrics import (
-    accuracy_score,
-    classification_report,
-    confusion_matrix,
-    mean_absolute_error,
-    r2_score,
-)
+import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
 
-# --------------------------------------------------------------------------- #
-# Configuration & constants
-# --------------------------------------------------------------------------- #
-st.set_page_config(
-    page_title="Student Performance · Group 6",
-    page_icon="🎓",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# ==========================================
+# 1. PAGE SETUP & HUMAN-CENTRIC BRANDING
+# ==========================================
+st.set_page_config(page_title="Early Intervention Dashboard", page_icon="🌱", layout="wide")
 
-SEED = 42
-PASS_MARK = 10          # grades are 0–20; 10 is the pass threshold
-AT_RISK_THRESHOLD = 10  # a student is "At-Risk" if predicted/actual G3 < 10
+# Custom CSS for a warm, clean layout  (FIX: unsafe_allow_html, not unsafe_index)
+st.markdown("""
+    <style>
+    .main-title { font-size: 32px; font-weight: bold; color: #1E3A8A; margin-bottom: 5px; }
+    .subtitle { font-size: 16px; color: #4B5563; margin-bottom: 25px; }
+    .card { background-color: #F3F4F6; padding: 20px; border-radius: 10px; margin-bottom: 15px; }
+    </style>
+""", unsafe_allow_html=True)
 
-# SDG colours
-SDG4_RED = "#C5192D"
-SDG5_ORANGE = "#FF3A21"
-ACCENT = "#1f6feb"
+st.markdown('<p class="main-title">🌱 Early Student Support & Intervention Dashboard</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Using predictive insights to build inclusive, equitable, and quality learning environments (Supporting UN SDG 4 & 5)</p>', unsafe_allow_html=True)
 
-# Features the models use (faithful to the project's selected drivers,
-# and intuitive for a faculty member to type in).
-# The 7 features selected for their direct academic impact (see project slides):
-#   Prior grades (G1, G2) · Academic history (failures) ·
-#   Lifestyle (absences, sex/gender) · Environment (Medu, famsup)
-FEATURES = ["G1", "G2", "failures", "absences", "sex", "Medu", "famsup"]
+# ==========================================
+# 2. ENGINE & DATA PROCESSING (Cached)
+# ==========================================
+@st.cache_data
+def load_and_clean_engine():
+    df = pd.read_csv("student-mat.csv")
 
-# Human-readable labels for the input widgets
-MEDU_LABELS = {
-    0: "0 — none",
-    1: "1 — primary (4th grade)",
-    2: "2 — 5th to 9th grade",
-    3: "3 — secondary",
-    4: "4 — higher education",
-}
-FAILURES_LABELS = {0: "0", 1: "1", 2: "2", 3: "3 or more"}
+    # Target: support needed if final grade G3 < 10
+    df['needs_support'] = (df['G3'] < 10).astype(int)
 
-sns.set_theme(style="whitegrid", font_scale=0.95)
+    # NOTE: this version excludes G1, G2, G3 from the features.
+    X = df.drop(columns=['G1', 'G2', 'G3', 'needs_support'])
+    y = df['needs_support']
 
+    raw_features = X.copy()
+    X_encoded = pd.get_dummies(X, drop_first=True)
+    feature_columns = X_encoded.columns.tolist()
 
-# --------------------------------------------------------------------------- #
-# Data loading & model training (cached)
-# --------------------------------------------------------------------------- #
-@st.cache_data(show_spinner=False)
-def load_data():
-    """Prefer the real `student-mat.csv`; fall back to the bundled sample.
-
-    Returns (DataFrame, is_sample: bool, source_name: str).
-    """
-    here = Path(__file__).parent
-    real = here / "student-mat.csv"
-    sample = here / "sample_student_data.csv"
-
-    if real.exists():
-        df = _read_flexible(real)
-        return df, False, real.name
-    if sample.exists():
-        df = _read_flexible(sample)
-        return df, True, sample.name
-
-    # Last resort: generate the sample on the fly
-    from generate_sample_data import build
-    df = build()
-    df.to_csv(sample, index=False)
-    return df, True, sample.name
-
-
-def _read_flexible(path: Path) -> pd.DataFrame:
-    """The original UCI file is ';'-separated; Kaggle copies use ','.
-    Try comma first, fall back to semicolon if everything lands in one column.
-    """
-    df = pd.read_csv(path)
-    if df.shape[1] == 1:
-        df = pd.read_csv(path, sep=";")
-    df.columns = df.columns.str.strip()
-    return df
-
-
-def preprocess(df: pd.DataFrame):
-    """Encode the model features and build both targets.
-
-    Returns (X, y_reg, y_clf). No feature scaling: Random Forests are
-    scale-invariant, so StandardScaler adds nothing here.
-    """
-    X = df[FEATURES].copy()
-    X["sex"] = X["sex"].map({"F": 1, "M": 0})
-    X["famsup"] = X["famsup"].map({"yes": 1, "no": 0})
-    X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
-
-    y_reg = df["G3"].astype(float)
-    y_clf = (df["G3"] < AT_RISK_THRESHOLD).astype(int)   # 1 = At-Risk
-    return X, y_reg, y_clf
-
-
-@st.cache_resource(show_spinner=False)
-def get_models():
-    """Train both Random Forest models and package everything the pages need."""
-    df, _, _ = load_data()
-    X, y_reg, y_clf = preprocess(df)
-
-    # ---- Regression: forecast final grade G3 ----
-    Xtr, Xte, ytr, yte = train_test_split(X, y_reg, test_size=0.2, random_state=SEED)
-    reg = RandomForestRegressor(n_estimators=200, random_state=SEED)
-    reg.fit(Xtr, ytr)
-    reg_pred = reg.predict(Xte)
-
-    reg_results = {
-        "r2": r2_score(yte, reg_pred),
-        "mae": mean_absolute_error(yte, reg_pred),
-        "importances": pd.Series(reg.feature_importances_, index=FEATURES).sort_values(),
-        "X_test": Xte,
-        "y_test": yte,
-        "pred": reg_pred,
-    }
-
-    # ---- Classification: detect At-Risk students (G3 < 10) ----
-    Xtr, Xte, ytr, yte = train_test_split(
-        X, y_clf, test_size=0.2, random_state=SEED, stratify=y_clf
-    )
-    clf = RandomForestClassifier(
-        n_estimators=200, random_state=SEED, class_weight="balanced"
-    )
-    clf.fit(Xtr, ytr)
-    clf_pred = clf.predict(Xte)
-
-    report = classification_report(
-        yte, clf_pred, target_names=["On Track", "At-Risk"], output_dict=True, zero_division=0
-    )
-    clf_results = {
-        "accuracy": accuracy_score(yte, clf_pred),
-        "report": report,
-        "cm": confusion_matrix(yte, clf_pred),
-        "importances": pd.Series(clf.feature_importances_, index=FEATURES).sort_values(),
-        "X_test": Xte,
-        "y_test": yte,
-        "pred": clf_pred,
-        "at_risk_rate": float(y_clf.mean()),
-    }
-
-    return {"reg": reg, "clf": clf, "reg_results": reg_results, "clf_results": clf_results}
-
-
-def encode_input(raw: dict) -> pd.DataFrame:
-    """Turn the widget values into a single-row frame matching FEATURES."""
-    row = {
-        "G1": raw["G1"],
-        "G2": raw["G2"],
-        "failures": raw["failures"],
-        "absences": raw["absences"],
-        "sex": 1 if raw["sex"] == "Female" else 0,
-        "Medu": raw["Medu"],
-        "famsup": 1 if raw["famsup"] == "Yes" else 0,
-    }
-    return pd.DataFrame([row])[FEATURES]
-
-
-# --------------------------------------------------------------------------- #
-# Small UI helpers
-# --------------------------------------------------------------------------- #
-def fig_to_streamlit(fig):
-    st.pyplot(fig, use_container_width=True)
-    plt.close(fig)
-
-
-def student_input_form(key_prefix: str) -> dict:
-    """Render the shared student-input widgets and return raw values.
-
-    Collects only the 7 model features selected in the project.
-    """
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**Academic record**")
-        g1 = st.slider("First-period grade (G1)", 0, 20, 11, key=f"{key_prefix}_g1")
-        g2 = st.slider("Second-period grade (G2)", 0, 20, 11, key=f"{key_prefix}_g2")
-        failures = st.selectbox(
-            "Past class failures", options=list(FAILURES_LABELS),
-            format_func=lambda x: FAILURES_LABELS[x], key=f"{key_prefix}_fail",
-        )
-        absences = st.number_input(
-            "School absences", min_value=0, max_value=93, value=4, key=f"{key_prefix}_abs"
-        )
-    with c2:
-        st.markdown("**Background & home**")
-        sex = st.radio("Gender", ["Female", "Male"], horizontal=True, key=f"{key_prefix}_sex")
-        medu = st.selectbox(
-            "Mother's education", options=list(MEDU_LABELS),
-            format_func=lambda x: MEDU_LABELS[x], index=2, key=f"{key_prefix}_me",
-        )
-        famsup = st.radio("Family educational support?", ["Yes", "No"],
-                          horizontal=True, key=f"{key_prefix}_fs")
-
-    return dict(
-        G1=g1, G2=g2, failures=failures, absences=absences,
-        sex=sex, Medu=medu, famsup=famsup,
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_encoded, y, test_size=0.2, random_state=42, stratify=y
     )
 
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
 
-# --------------------------------------------------------------------------- #
-# Pages
-# --------------------------------------------------------------------------- #
-def page_overview(df, is_sample):
-    st.title("🎓 Gender-Based Analysis of Student Academic Performance")
-    st.caption(
-        "Machine Learning mini-project · Group 6 · Institute of Technology of Cambodia "
-        "· Dept. of Applied Mathematics and Statistics"
-    )
+    model = RandomForestClassifier(n_estimators=120, random_state=42, class_weight='balanced')
+    model.fit(X_train_scaled, y_train)
 
-    st.markdown(
-        """
-This interactive dashboard turns our project notebook into a working tool. Using the
-**Student Performance** dataset, it analyses how academic, behavioural and family
-factors — including **gender** — relate to student outcomes, and it predicts results
-with **Random Forest** models.
+    acc = accuracy_score(y_test, model.predict(X_test_scaled))
+    return model, scaler, feature_columns, raw_features, acc
 
-The work is framed around two United Nations Sustainable Development Goals:
-"""
-    )
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(
-            f"<div style='border-left:6px solid {SDG4_RED};padding:0.6rem 1rem;"
-            f"background:rgba(197,25,45,0.06);border-radius:6px'>"
-            f"<b>SDG 4 — Quality Education</b><br>Forecast the final grade (G3) so "
-            f"teachers can support students <i>before</i> the final exam.</div>",
-            unsafe_allow_html=True,
-        )
-    with c2:
-        st.markdown(
-            f"<div style='border-left:6px solid {SDG5_ORANGE};padding:0.6rem 1rem;"
-            f"background:rgba(255,58,33,0.06);border-radius:6px'>"
-            f"<b>SDG 5 — Gender Equality</b><br>Detect at-risk students and compare "
-            f"male / female outcomes to keep learning opportunities equal.</div>",
-            unsafe_allow_html=True,
-        )
+try:
+    model, scaler, model_features, raw_X, model_accuracy = load_and_clean_engine()
+except FileNotFoundError:
+    st.error("❌ Could not locate 'student-mat.csv' in this directory. Please upload it to proceed.")
+    st.stop()
 
-    st.divider()
-    st.subheader("Dataset at a glance")
-    pass_rate = (df["G3"] >= PASS_MARK).mean() * 100
-    m = st.columns(4)
-    m[0].metric("Students", f"{len(df):,}")
-    m[1].metric("Features", df.shape[1])
-    m[2].metric("Average final grade (G3)", f"{df['G3'].mean():.2f} / 20")
-    m[3].metric("Pass rate (G3 ≥ 10)", f"{pass_rate:.0f}%")
+# ==========================================
+# 3. SIDEBAR: PROJECT INSIGHTS & PURPOSE
+# ==========================================
+with st.sidebar:
+    st.markdown("### 📊 Dashboard Status")
+    st.metric(label="Model Accuracy", value=f"{model_accuracy * 100:.1f}%")
 
-    g = df["sex"].value_counts()
-    st.write(
-        f"The cohort is balanced by gender: **{int(g.get('F', 0))} female** and "
-        f"**{int(g.get('M', 0))} male** students."
-    )
+    st.markdown("---")
+    st.markdown("### 🎯 Core Objectives")
+    st.markdown("""
+    * **SDG 4 (Quality Education):** Ensuring no student quietly slips through the cracks.
+    * **SDG 5 (Gender Equality):** Mapping socio-demographic variables like parental education to address systemic gaps.
+    * **Early prediction:** This version uses lifestyle and background factors only.
+    """)
 
-    with st.expander("What's in each page?"):
-        st.markdown(
-            """
-- **Explore the Data** — the key charts from our EDA (gender, grades, absences, family, correlations).
-- **Predict Final Grade** — type a student's details and forecast their G3 (regression).
-- **At-Risk Detector** — the live early-warning tool: instant At-Risk alert with probability (classification).
-- **Model Insights** — accuracy, R², feature importance and gender-parity results.
-"""
-        )
+# ==========================================
+# 4. HUMANISED INPUT FORM
+# ==========================================
+st.markdown("### 🧑‍🎓 Student Profile Intake Form")
+st.caption("Fill out the baseline and behavioural details below to run an academic wellness check.")
 
-    st.divider()
-    st.subheader("Preview of the data")
-    st.dataframe(df.head(15), use_container_width=True)
+with st.container():
+    col1, col2, col3 = st.columns(3)
 
+    with col1:
+        st.markdown("**Socio-Demographics**")
+        sex_choice = st.radio("Gender Profile", options=["Female", "Male"], horizontal=True, key="gender_radio")
+        sex = "F" if sex_choice == "Female" else "M"
+        age = st.slider("Current Age", 15, 22, 17)
+        failures = st.selectbox("Previous Unpassed Classes", options=[0, 1, 2, 3],
+                                help="Number of past class failures.")
+        absences = st.number_input("Total Days Absent", min_value=0, max_value=90, value=0)
 
-def page_explore(df):
-    st.title("📊 Explore the Data")
-    st.caption("The exploratory analysis from the notebook, made interactive.")
+    with col2:
+        st.markdown("**Home & Foundation**")
+        medu_map = {"None": 0, "Primary (4th Grade)": 1, "Middle School (9th Grade)": 2,
+                    "Secondary Education": 3, "Higher Education": 4}
+        Medu_label = st.selectbox("Mother's Educational Background", options=list(medu_map.keys()), index=3)
+        Medu = medu_map[Medu_label]
 
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["Gender & grades", "What drives grades", "Family & environment", "Correlations"]
-    )
+        study_map = {"Less than 2 hours": 1, "2 to 5 hours": 2, "5 to 10 hours": 3, "More than 10 hours": 4}
+        study_label = st.selectbox("Weekly Self-Study Commitment", options=list(study_map.keys()), index=1)
+        studytime = study_map[study_label]
 
-    # ---- Tab 1: gender & grades ----
-    with tab1:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Number of students by gender**")
-            fig, ax = plt.subplots(figsize=(5, 4))
-            sns.countplot(data=df, x="sex", hue="sex", palette=[SDG5_ORANGE, ACCENT],
-                          legend=False, ax=ax)
-            ax.set_xlabel("Gender"); ax.set_ylabel("Students")
-            ax.set_xticks([0, 1]); ax.set_xticklabels(["Female", "Male"])
-            fig_to_streamlit(fig)
-        with c2:
-            st.markdown("**Final grade (G3) by gender**")
-            fig, ax = plt.subplots(figsize=(5, 4))
-            sns.boxplot(data=df, x="sex", y="G3", hue="sex",
-                        palette=[SDG5_ORANGE, ACCENT], legend=False, ax=ax)
-            ax.set_xlabel("Gender"); ax.set_ylabel("Final grade")
-            ax.set_xticks([0, 1]); ax.set_xticklabels(["Female", "Male"])
-            fig_to_streamlit(fig)
+        internet = st.radio("Reliable Web Access at Home?", options=["Yes", "No"], horizontal=True)
 
-        st.markdown("**Average grades (G1, G2, G3) by gender**")
-        gender_grade = df.groupby("sex")[["G1", "G2", "G3"]].mean()
-        gender_grade.index = ["Female", "Male"]
-        fig, ax = plt.subplots(figsize=(8, 3.6))
-        gender_grade.plot(kind="bar", ax=ax, color=["#9ecae1", "#4292c6", "#08519c"])
-        ax.set_xlabel("Gender"); ax.set_ylabel("Average grade")
-        plt.xticks(rotation=0)
-        fig_to_streamlit(fig)
-        st.info(
-            f"On average, male students score **{df[df.sex=='M'].G3.mean():.2f}** and "
-            f"female students **{df[df.sex=='F'].G3.mean():.2f}** on the final grade.",
-            icon="📌",
-        )
+    with col3:
+        st.markdown("**Social Lifestyle Balance**")
+        goout = st.slider("Frequency of Going Out with Peers", 1, 5, 3,
+                          help="1: Extremely isolated, 5: Highly social outside class hours.")
+        health = st.slider("Self-Reported Health & Vitality", 1, 5, 5,
+                           help="1: Severe exhaustion/illness, 5: Energetic and healthy.")
+        schoolsup = st.radio("Receiving Extra Institutional Support?", options=["Yes", "No"], index=1, horizontal=True)
+        famsup = st.radio("Receiving Educational Family Support?", options=["Yes", "No"], index=0, horizontal=True)
 
-    # ---- Tab 2: what drives grades ----
-    with tab2:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Study time vs final grade**")
-            fig, ax = plt.subplots(figsize=(5, 4))
-            sns.boxplot(data=df, x="studytime", y="G3", color="#74c476", ax=ax)
-            ax.set_xlabel("Weekly study time (1=low → 4=high)"); ax.set_ylabel("Final grade")
-            fig_to_streamlit(fig)
-        with c2:
-            st.markdown("**Past failures vs final grade**")
-            fig, ax = plt.subplots(figsize=(5, 4))
-            sns.boxplot(data=df, x="failures", y="G3", color="#fb6a4a", ax=ax)
-            ax.set_xlabel("Number of past failures"); ax.set_ylabel("Final grade")
-            fig_to_streamlit(fig)
+# Fill non-form columns with dataset modes/medians to keep the form light
+input_data = {col: raw_X[col].mode()[0] if raw_X[col].dtype == 'object' else int(raw_X[col].median())
+              for col in raw_X.columns}
 
-        st.markdown("**Absences vs final grade**")
-        fig, ax = plt.subplots(figsize=(8, 3.8))
-        sns.scatterplot(data=df, x="absences", y="G3", hue="sex",
-                        palette=[SDG5_ORANGE, ACCENT], alpha=0.7, ax=ax)
-        ax.set_xlabel("Absences"); ax.set_ylabel("Final grade")
-        ax.legend(title="", labels=["Female", "Male"])
-        fig_to_streamlit(fig)
-        st.info("Higher absences tend to pull final grades down — a key behavioural red flag.", icon="📌")
+# Overwrite with the user's choices  (FIX: sex was always becoming "M" before)
+input_data['sex'] = sex
+input_data['age'] = age
+input_data['failures'] = failures
+input_data['absences'] = absences
+input_data['Medu'] = Medu
+input_data['studytime'] = studytime
+input_data['internet'] = internet.lower()
+input_data['schoolsup'] = schoolsup.lower()
+input_data['famsup'] = famsup.lower()
+input_data['goout'] = goout
+input_data['health'] = health
 
-    # ---- Tab 3: family & environment ----
-    with tab3:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Mother's education vs final grade**")
-            fig, ax = plt.subplots(figsize=(5, 4))
-            sns.boxplot(data=df, x="Medu", y="G3", color="#807dba", ax=ax)
-            ax.set_xlabel("Mother's education (0–4)"); ax.set_ylabel("Final grade")
-            fig_to_streamlit(fig)
-        with c2:
-            st.markdown("**Family support**")
-            fam = df["famsup"].value_counts()
-            fig, ax = plt.subplots(figsize=(5, 4))
-            ax.bar(["Yes", "No"], [fam.get("yes", 0), fam.get("no", 0)],
-                   color=["#41ab5d", "#d9d9d9"])
-            ax.set_ylabel("Students")
-            fig_to_streamlit(fig)
-        st.info(
-            "Maternal education and family support form a social safety net linked to "
-            "stronger, more stable outcomes (SDG 5).",
-            icon="📌",
-        )
+# ==========================================
+# 5. EXECUTION & ACTIONABLE OUTPUT
+# ==========================================
+st.markdown("<br>", unsafe_allow_html=True)
+if st.button("🔍 Evaluate Academic Wellness & Support Needs", type="primary", use_container_width=True):
 
-    # ---- Tab 4: correlations ----
-    with tab4:
-        st.markdown("**Correlation heatmap (numeric features)**")
-        num = df.select_dtypes(include=[np.number])
-        fig, ax = plt.subplots(figsize=(11, 8))
-        sns.heatmap(num.corr(), annot=True, fmt=".2f", cmap="coolwarm",
-                    center=0, annot_kws={"size": 7}, ax=ax)
-        fig_to_streamlit(fig)
+    input_df = pd.DataFrame([input_data])
+    input_encoded = pd.get_dummies(input_df)
 
-        st.markdown("**How each numeric feature correlates with the final grade (G3)**")
-        corr_g3 = num.corr()["G3"].drop("G3").sort_values()
-        fig, ax = plt.subplots(figsize=(8, 5))
-        colors = [SDG4_RED if v < 0 else ACCENT for v in corr_g3.values]
-        ax.barh(corr_g3.index, corr_g3.values, color=colors)
-        ax.axvline(0, color="black", lw=0.8)
-        ax.set_xlabel("Correlation with G3")
-        fig_to_streamlit(fig)
+    final_input = pd.DataFrame(0, index=[0], columns=model_features)
+    for col in model_features:
+        if col in input_encoded.columns:
+            final_input[col] = input_encoded[col]
 
+    scaled_vector = scaler.transform(final_input)
+    prediction = model.predict(scaled_vector)[0]
+    probability = model.predict_proba(scaled_vector)[0][1] * 100
 
-def page_predict_grade(models, df):
-    st.title(" Predict Final Grade (G3)")
-    st.caption("Random Forest Regression · SDG 4 — forecast outcomes for early support.")
+    st.markdown("---")
+    st.markdown("### 🎯 Diagnostic Evaluation Results")
 
-    raw = student_input_form("reg")
-    st.divider()
+    if prediction == 1:
+        st.error("⚠️ **Action Recommended: Higher Academic Stress Risk Detected**")
 
-    if st.button("Predict final grade", type="primary", use_container_width=True):
-        x = encode_input(raw)
-        pred = float(models["reg"].predict(x)[0])
-        pred = max(0.0, min(20.0, pred))
-        mean_g3 = df["G3"].mean()
+        m1, m2 = st.columns([1, 3])
+        m1.metric("Vulnerability Index", f"{probability:.1f}%",
+                  help="Probability that this profile needs proactive academic support.")
+        m2.markdown(f"""
+        **Educational Assessment:** This student shows a **{probability:.1f}%** alignment with profiles
+        that struggle to pass final assessments under standard teaching conditions.
+        The strongest stress signals are past unpassed classes (`failures`) and attendance irregularities (`absences`).
+        """)
 
-        c1, c2 = st.columns([1, 1.3])
-        with c1:
-            st.metric(
-                "Predicted final grade",
-                f"{pred:.1f} / 20",
-                delta=f"{pred - mean_g3:+.1f} vs class average",
-            )
-            if pred >= 14:
-                st.success("On track for a strong result. ✅")
-            elif pred >= PASS_MARK:
-                st.info("Likely to pass, but there is room to improve. 📘")
-            else:
-                st.error("At risk of failing — recommend academic support. ⚠️")
-        with c2:
-            fig, ax = plt.subplots(figsize=(6, 1.7))
-            ax.barh([0], [pred], color=ACCENT, height=0.5)
-            ax.axvline(PASS_MARK, color=SDG4_RED, ls="--", lw=1.5)
-            ax.text(PASS_MARK + 0.2, 0.32, "pass mark (10)", color=SDG4_RED, fontsize=8)
-            ax.set_xlim(0, 20); ax.set_yticks([]); ax.set_xlabel("Grade (0–20)")
-            ax.set_title(f"Predicted G3 = {pred:.1f}")
-            fig_to_streamlit(fig)
+        st.markdown("#### 🛠️ Recommended Care Pathway")
+        c1, c2, c3 = st.columns(3)
+        c1.info("**1. Academic Coaching**\n\nInvite the student to peer-tutoring groups to review core subjects before major tests.")
+        c2.info("**2. Flexibility Review**\n\nCheck whether high absences come from health, family, or transport issues.")
+        c3.info("**3. Mentorship Connection**\n\nAssign a counsellor to build an early connection and rebuild classroom confidence.")
 
-        st.caption(
-            "Grades are on a 0–20 scale. Prediction uses prior grades (G1, G2), "
-            "absences, past failures, gender, mother's education, and family support."
-        )
+    else:
+        st.success("✨ **Academic Standing: Stable & Thriving**")
+        st.balloons()   # 🎉 celebrate a good result
 
+        m1, m2 = st.columns([1, 3])
+        m1.metric("Vulnerability Index", f"{probability:.1f}%")
+        m2.markdown(f"""
+        **Educational Assessment:** This student's current indicators reflect strong academic endurance.
+        Their profile shows a very low (**{probability:.1f}%**) risk of falling behind.
+        """)
 
-def page_risk(models, df):
-    st.title("🚨 At-Risk Early-Warning Detector")
-    st.caption("Random Forest Classifier · the live dashboard from our Future Work.")
-    st.markdown(
-        "Enter a student's details to get an **instant At-Risk alert**. A student is "
-        f"flagged **At-Risk** when their predicted final grade would fall below "
-        f"**{AT_RISK_THRESHOLD}/20** (a fail)."
-    )
-
-    raw = student_input_form("clf")
-    st.divider()
-
-    if st.button("Check risk status", type="primary", use_container_width=True):
-        x = encode_input(raw)
-        proba = float(models["clf"].predict_proba(x)[0][1])  # P(At-Risk)
-        is_risk = proba >= 0.5
-
-        c1, c2 = st.columns([1, 1.2])
-        with c1:
-            if is_risk:
-                st.error(f"### ⚠️ AT-RISK\nRisk probability: **{proba*100:.0f}%**")
-                st.markdown("**Recommended action:** flag for academic mentoring and "
-                            "monitor attendance closely.")
-            else:
-                st.success(f"### ✅ ON TRACK\nRisk probability: **{proba*100:.0f}%**")
-                st.markdown("**Recommended action:** standard monitoring.")
-            st.progress(proba)
-        with c2:
-            st.markdown("**How this student compares with the cohort**")
-            cohort = df[["G1", "G2", "absences", "failures"]].mean()
-            comp = pd.DataFrame({
-                "This student": [raw["G1"], raw["G2"], raw["absences"], raw["failures"]],
-                "Cohort average": [cohort["G1"], cohort["G2"], cohort["absences"], cohort["failures"]],
-            }, index=["G1", "G2", "Absences", "Failures"]).round(1)
-            st.dataframe(comp, use_container_width=True)
-            st.caption(
-                "Low G1/G2, high absences or past failures are the strongest signals "
-                "the model uses to raise an alert."
-            )
-
-
-def page_insights(models):
-    st.title("📈 Model Insights")
-    st.caption("Performance, key drivers and gender-parity results.")
-
-    reg = models["reg_results"]
-    clf = models["clf_results"]
-
-    # ---- headline metrics ----
-    m = st.columns(4)
-    m[0].metric("Regression R²", f"{reg['r2']:.3f}",
-                help="Share of variance in G3 explained by the model.")
-    m[1].metric("Regression MAE", f"{reg['mae']:.2f} pts",
-                help="Average grade error (0–20 scale).")
-    m[2].metric("Classifier accuracy", f"{clf['accuracy']*100:.1f}%")
-    m[3].metric("At-risk students", f"{clf['at_risk_rate']*100:.1f}%",
-                help="Share of the dataset with G3 < 10.")
-
-    st.divider()
-    tab1, tab2, tab3 = st.tabs(
-        ["Feature importance", "Classifier quality", "Gender parity (SDG 5)"]
-    )
-
-    # ---- Tab 1: feature importance ----
-    with tab1:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Grade forecast — top drivers**")
-            imp = reg["importances"].tail(8)
-            fig, ax = plt.subplots(figsize=(5.5, 4.2))
-            ax.barh(imp.index, imp.values, color=ACCENT)
-            ax.set_xlabel("Importance")
-            fig_to_streamlit(fig)
-        with c2:
-            st.markdown("**At-Risk detection — top drivers**")
-            imp = clf["importances"].tail(8)
-            fig, ax = plt.subplots(figsize=(5.5, 4.2))
-            ax.barh(imp.index, imp.values, color=SDG4_RED)
-            ax.set_xlabel("Importance")
-            fig_to_streamlit(fig)
-        st.info(
-            "Prior grades **G1 and G2** dominate the forecast — mid-term performance "
-            "largely sets the final outcome — while **absences** and **failures** are "
-            "the strongest non-grade warning signals.",
-            icon="🧭",
-        )
-
-    # ---- Tab 2: classifier quality ----
-    with tab2:
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            st.markdown("**Confusion matrix**")
-            cm = clf["cm"]
-            fig, ax = plt.subplots(figsize=(4.5, 3.8))
-            sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False,
-                        xticklabels=["On Track", "At-Risk"],
-                        yticklabels=["On Track", "At-Risk"], ax=ax)
-            ax.set_xlabel("Predicted"); ax.set_ylabel("Actual")
-            fig_to_streamlit(fig)
-        with c2:
-            st.markdown("**Classification report**")
-            rep = pd.DataFrame(clf["report"]).transpose().round(3)
-            rep = rep.loc[["On Track", "At-Risk"], ["precision", "recall", "f1-score", "support"]]
-            st.dataframe(rep, use_container_width=True)
-            st.caption(
-                "Recall on the **At-Risk** row matters most: it is the share of truly "
-                "struggling students the system successfully flags."
-            )
-
-    # ---- Tab 3: gender parity ----
-    with tab3:
-        st.markdown("**Actual vs predicted final grade, by gender** (held-out test set)")
-        parity = pd.DataFrame({
-            "sex": reg["X_test"]["sex"].values,
-            "Actual G3": reg["y_test"].values,
-            "Predicted G3": reg["pred"],
-        })
-        table = parity.groupby("sex")[["Actual G3", "Predicted G3"]].mean()
-        table.index = ["Male" if i == 0 else "Female" for i in table.index]
-        table = table.round(2)
-        table["Model accuracy"] = (
-            100 - (abs(table["Actual G3"] - table["Predicted G3"]) / table["Actual G3"] * 100)
-        ).round(1).astype(str) + "%"
-
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            st.dataframe(table, use_container_width=True)
-        with c2:
-            fig, ax = plt.subplots(figsize=(5.5, 3.6))
-            table[["Actual G3", "Predicted G3"]].plot(
-                kind="bar", ax=ax, color=["#08519c", "#9ecae1"]
-            )
-            ax.set_ylabel("Final grade"); plt.xticks(rotation=0)
-            fig_to_streamlit(fig)
-        st.info(
-            "The model predicts male and female outcomes with similar accuracy, so its "
-            "errors do not systematically disadvantage either group — important for a "
-            "fair, SDG 5–aligned tool.",
-            icon="⚖️",
-        )
-
-    st.divider()
-    with st.expander("📌 Key findings (summary)"):
-        st.markdown(
-            """
-- **Mid-term grades (G1 & G2) are the strongest predictors** of the final grade.
-- **Absences** are the leading *behavioural* warning sign of failure / dropout risk.
-- **Past failures** sharply lower predicted grades and act as a high-risk trigger.
-- **Mother's education and family support** form a social safety net linked to stronger
-  outcomes — a direct, multi-generational link to gender equality (SDG 5).
-- Two Random Forest models — a **regressor** (forecast G3) and a **classifier**
-  (detect At-Risk) — together let educators act *before* students fall behind (SDG 4).
-"""
-        )
-
-
-# --------------------------------------------------------------------------- #
-# Sidebar & router
-# --------------------------------------------------------------------------- #
-def main():
-    df, is_sample, source = load_data()
-    models = get_models()
-
-    with st.sidebar:
-        st.markdown("### 🎓 Group 6 · ITC")
-        st.caption("Student Academic Performance · ML Mini-Project")
-        page = st.radio(
-            "Navigate",
-            ["Overview", "Explore the Data", "Predict Final Grade",
-             "At-Risk Detector", "Model Insights"],
-        )
-        st.divider()
-        st.caption(f"📁 Data source: `{source}`  ·  {len(df)} students")
-        if is_sample:
-            st.warning(
-                "**Using synthetic sample data.**\n\nThis is a placeholder so the app "
-                "runs. For your real results, download the *Student Performance* dataset "
-                "and save it as **`student-mat.csv`** in the project folder, then rerun. "
-                "See the README.",
-                icon="⚠️",
-            )
-        st.divider()
-        st.caption("SDG 4 — Quality Education\nSDG 5 — Gender Equality")
-
-    if page == "Overview":
-        page_overview(df, is_sample)
-    elif page == "Explore the Data":
-        page_explore(df)
-    elif page == "Predict Final Grade":
-        page_predict_grade(models, df)
-    elif page == "At-Risk Detector":
-        page_risk(models, df)
-    elif page == "Model Insights":
-        page_insights(models)
-
-
-if __name__ == "__main__":
-    main()
+        st.markdown("#### 🌾 Maintenance Plan")
+        st.markdown("* Keep providing standard access to campus web services and resource centres.\n"
+                    "* Monitor progress trends leading up to midterms without heavy intervention.")
