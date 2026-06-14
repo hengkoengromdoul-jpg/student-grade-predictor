@@ -9,7 +9,7 @@ from sklearn.metrics import accuracy_score
 # ==========================================================
 # 1. PAGE CONFIG
 # ==========================================================
-st.set_page_config(page_title="Student Support Compass", page_icon="🌱", layout="wide")
+st.set_page_config(page_title="Group 6 — Student Performance & Gender Equity", page_icon="🌱", layout="wide")
 
 # ==========================================================
 # 2. VISUAL IDENTITY  (growth & support theme)
@@ -116,10 +116,11 @@ except FileNotFoundError:
 # ==========================================================
 st.markdown("""
 <div class="hero">
-  <span class="pill">🌱 Supporting UN SDG 4 &amp; 5</span>
-  <h1>Student Support Compass</h1>
-  <p>A wellness check that spots students who may need a helping hand — early, and before grades slip —
-  so every learner gets a fair chance to thrive.</p>
+  <span class="pill">Group 6 · ITC · SDG 4 &amp; 5</span>
+  <h1>Gender-Based Analysis of Student Academic Performance</h1>
+  <p>A machine-learning early-warning tool that flags students at risk of failing — part of our study
+  into how gender and home background shape academic outcomes, supporting Quality Education (SDG 4)
+  and Gender Equality (SDG 5).</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -133,10 +134,11 @@ s3.metric("Needed support in data", f"{cohort['at_risk_rate']:.0f}%")
 # 5. SIDEBAR
 # ==========================================================
 with st.sidebar:
-    st.markdown("### 🧭 What this tool does")
+    st.markdown("### 📘 About this project")
     st.markdown(
-        "It reads a student's background and habits, then estimates whether they're on a "
-        "healthy path or could use early support — turning a quiet worry into a clear, kind action."
+        "Group 6 — Institute of Technology of Cambodia, Department of Applied Mathematics and "
+        "Statistics. We use a Random Forest model on the Student Performance dataset to predict "
+        "at-risk students and analyse gender-based differences in academic outcomes."
     )
     st.markdown("---")
     st.markdown("### 🎯 Why it matters")
